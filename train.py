@@ -15,6 +15,8 @@ from argparse import ArgumentParser
 from meta import config
 import pyfolio
 from pyfolio import timeseries
+import numpy as np
+
 pd.options.display.max_columns = None
 
 ### data processing and feature engineering
@@ -25,35 +27,41 @@ TRADE_END_DATE = "2022-07-08"
 TIME_INTERVAL = "1d"
 
 p = DataProcessor(
-    data_path='./',#改数据集
+    data_path='../Dataset/process_2018_2022_sp500_data_label.csv',#鏀规暟鎹泦
     start_date=TRAIN_START_DATE,
     end_date=TRADE_END_DATE,
     time_interval=TIME_INTERVAL,
 )
 
-p.clean_data()
+# judge if the data is nan
+isnan = p.dataframe.isnull().values.any()
+print("data is nan : "+str(isnan))
+
 # add_technical_indicator
+#p.clean_data()
 p.add_technical_indicator(config.INDICATORS)
-p.clean_data()
+
 
 ### Split traning dataset
 
 train = p.data_split(p.dataframe, TRAIN_START_DATE, TRAIN_END_DATE)
-print(f"len(train.tic.unique()): {len(train.tic.unique())}")
 
-print(f"train.tic.unique(): {train.tic.unique()}")
+print(f"len(train.tic.unique()) : {len(train.tic.unique())}")
 
-print(f"train.head(): {train.head()}")
+print(f"train.tic.unique() : {train.tic.unique()}")
 
-print(f"train.shape: {train.shape}")
+print(f"train.head() : {train.head()}")
+
+print(f"train.shape : {train.shape}")
 
 stock_dimension = len(train.tic.unique())
 state_space = stock_dimension * (len(config.INDICATORS) + 2) + 1
-print(f"Stock Dimension: {stock_dimension}, State Space: {state_space}")
+print(f"Stock Dimension : {stock_dimension}, State Space : {state_space}")
 
 ### Train
 
 env_kwargs = {
+    "model": "DDPG",
     "stock_dim": stock_dimension,
     "hmax": 1000,
     "initial_amount": 1000000,
@@ -65,53 +73,67 @@ env_kwargs = {
     "tech_indicator_list": config.INDICATORS,
     "print_verbosity": 1,
     "initial_buy": True,
-    "hundred_each_trade": True,
+    "hundred_each_trade": True
 }
 
 e_train_gym = StockTradingEnv(df=train, **env_kwargs)
 
-## DDPG
-
 env_train, _ = e_train_gym.get_sb_env()
 print(f"print(type(env_train)): {print(type(env_train))}")
 
-agent = DRLAgent(env=env_train)
-DDPG_PARAMS = {
-    "batch_size": 256,
-    "buffer_size": 50000,
-    "learning_rate": 0.0005,
-    "action_noise": "normal",
-}
-POLICY_KWARGS = dict(net_arch=dict(pi=[64, 64], qf=[400, 300]))
-model_ddpg = agent.get_model(
-    "ddpg", model_kwargs=DDPG_PARAMS, policy_kwargs=POLICY_KWARGS
-)
+if env_kwargs["model"] == "DDPG":
+    # DDPG
 
-trained_ddpg = agent.train_model(
-    model=model_ddpg, tb_log_name="ddpg", total_timesteps=50000
-)
+    agent = DRLAgent(env=env_train)
+    DDPG_PARAMS = {
+        "batch_size": 256,
+        "buffer_size": 50000,
+        "learning_rate": 0.0005,
+        "action_noise": "normal",
+    }
+    POLICY_KWARGS = dict(net_arch=dict(pi=[64, 64], qf=[400, 300]))
+    model_ddpg = agent.get_model(
+        "ddpg", model_kwargs=DDPG_PARAMS, policy_kwargs=POLICY_KWARGS
+    )
 
-# ## A2C
+    trained_ddpg = agent.train_model(
+        model=model_ddpg, tb_log_name="ddpg", total_timesteps=100
+    )
+    # save model static
+    trained_ddpg.save("ddpg_model")
 
-# agent = DRLAgent(env=env_train)
-# model_a2c = agent.get_model("a2c")
+    trade_model = trained_ddpg
 
-# trained_a2c = agent.train_model(
-#     model=model_a2c, tb_log_name="a2c", total_timesteps=50000
-# )
+elif env_kwargs["model"] == "A2C":
+    # A2C
 
-# ## PPO
+    agent = DRLAgent(env=env_train)
+    model_a2c = agent.get_model("a2c")
 
-# agent = DRLAgent(env=env_train)
-# model_ppo = agent.get_model("ppo")
+    trained_a2c = agent.train_model(
+        model=model_a2c, tb_log_name="a2c", total_timesteps=50000
+    )
+    # save model static
+    trained_a2c.save("a2c_model")
 
-# trained_ppo = agent.train_model(
-#     model=model_ppo, tb_log_name="ppo", total_timesteps=50000
-# )
+    trade_mode = trained_a2c
+
+elif env_kwargs["model"] == "PPO":
+    # PPO
+
+    agent = DRLAgent(env=env_train)
+    model_ppo = agent.get_model("ppo")
+
+    trained_ppo = agent.train_model(
+        model=model_ppo, tb_log_name="ppo", total_timesteps=50000
+    )
+    # save model static
+    trained_ppo.save("ppo_model")
+
+    trade_model = trained_ppo
+
 
 ### Trade
-
-
 trade = p.data_split(p.dataframe, TRADE_START_DATE, TRADE_END_DATE)
 env_kwargs = {
     "stock_dim": stock_dimension,
@@ -130,10 +152,19 @@ env_kwargs = {
 e_trade_gym = StockTradingEnv(df=trade, **env_kwargs)
 
 df_account_value, df_actions, rewards = DRLAgent.DRL_prediction(
-    model=trained_ddpg, environment=e_trade_gym
+    model=trade_model, environment=e_trade_gym
 )
 
-print(rewards)
+# plot rewards
+import matplotlib.pyplot as plt
+plt.xlabel("episode")
+plt.ylabel("reward")
+plt.plot(rewards)
+plt.show()
+
+# print sum of rewrad
+total_reward = sum(rewards)
+print('鎬绘敹鐩婁负 : '+str(rewards))
 
 df_actions.to_csv("action.csv", index=False)
 print(f"df_actions: {df_actions}")

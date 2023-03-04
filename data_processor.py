@@ -21,17 +21,15 @@ class DataProcessor:
         self.start_date = start_date
         self.end_date = end_date
         self.time_interval = time_interval
-        self.dataframe=pd.read_csv(data_path,encoding='utf-8')
+        self.dataframe=pd.read_csv(data_path,encoding='utf-8',index_col=0)
         if "dt" in self.dataframe.columns.values.tolist():
             self.dataframe = self.dataframe.rename(columns={"dt": "date"})
         if "kdcode" in self.dataframe.columns.values.tolist():
             self.dataframe = self.dataframe.rename(columns={"kdcode": "tic"})
         self.ticker_list=self.dataframe.tic.unique()
-        print(self.dataframe.head())
+        #print(self.dataframe.head())
     
     def clean_data(self):
-        if "time" in self.dataframe.columns.values.tolist():
-            self.dataframe = self.dataframe.rename(columns={"time": "date"})
         dfc = copy.deepcopy(self.dataframe)
         dfcode = pd.DataFrame(columns=["tic"])
         dfdate = pd.DataFrame(columns=["date"])
@@ -78,19 +76,13 @@ class DataProcessor:
     def add_technical_indicator(
         self, tech_indicator_list: List[str], select_stockstats_talib: int = 0
     ):
-        if "date" in self.dataframe.columns.values.tolist():
-            self.dataframe.rename(columns={"date": "time"}, inplace=True)
-        self.dataframe.reset_index(drop=False, inplace=True)
-        if "level_1" in self.dataframe.columns:
-            self.dataframe.drop(columns=["level_1"], inplace=True)
-        if "level_0" in self.dataframe.columns and "tic" not in self.dataframe.columns:
-            self.dataframe.rename(columns={"level_0": "tic"}, inplace=True)
         assert select_stockstats_talib in {0, 1}
         print("tech_indicator_list: ", tech_indicator_list)
         if select_stockstats_talib == 0:  # use stockstats
-            stock = stockstats.StockDataFrame.retype(self.dataframe)
-            #print(stock)
+            dfc = copy.deepcopy(self.dataframe) 
+            stock = stockstats.StockDataFrame.retype(dfc)
             unique_ticker = stock.tic.unique()
+            # print("unique_ticker: ", unique_ticker)
             for indicator in tech_indicator_list:
                 print("indicator: ", indicator)
                 indicator_df = pd.DataFrame()
@@ -99,9 +91,9 @@ class DataProcessor:
                         temp_indicator = stock[stock.tic == unique_ticker[i]][indicator]
                         temp_indicator = pd.DataFrame(temp_indicator)
                         temp_indicator["tic"] = unique_ticker[i]
-                        temp_indicator["time"] = self.dataframe[
+                        temp_indicator["date"] = self.dataframe[
                             self.dataframe.tic == unique_ticker[i]
-                        ]["time"].to_list()
+                        ]["date"].to_list()
                         indicator_df = pd.concat(
                             [indicator_df, temp_indicator],
                             axis=0,
@@ -112,8 +104,8 @@ class DataProcessor:
                         print(e)
                 if not indicator_df.empty:
                     self.dataframe = self.dataframe.merge(
-                        indicator_df[["tic", "time", indicator]],
-                        on=["tic", "time"],
+                        indicator_df[["tic", "date", indicator]],
+                        on=["tic", "date"],
                         how="left",
                     )
         else:  # use talib
@@ -146,9 +138,9 @@ class DataProcessor:
                 final_df = pd.concat([final_df, tic_df], axis=0, join="outer")
             self.dataframe = final_df
 
-        self.dataframe.sort_values(by=["time", "tic"], inplace=True)
-        time_to_drop = self.dataframe[self.dataframe.isna().any(axis=1)].time.unique()
-        self.dataframe = self.dataframe[~self.dataframe.time.isin(time_to_drop)]
+        self.dataframe.sort_values(by=["date", "tic"], inplace=True)
+        time_to_drop = self.dataframe[self.dataframe.isna().any(axis=1)].date.unique()
+        self.dataframe = self.dataframe[~self.dataframe.date.isin(time_to_drop)]
         print("Succesfully add technical indicators")
 
     def data_split(self, df, start, end, target_date_col="date"):
