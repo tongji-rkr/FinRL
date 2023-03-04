@@ -79,8 +79,7 @@ class DataProcessor:
         assert select_stockstats_talib in {0, 1}
         print("tech_indicator_list: ", tech_indicator_list)
         if select_stockstats_talib == 0:  # use stockstats
-            dfc = copy.deepcopy(self.dataframe) 
-            stock = stockstats.StockDataFrame.retype(dfc)
+            stock = stockstats.StockDataFrame.retype(self.dataframe)
             unique_ticker = stock.tic.unique()
             # print("unique_ticker: ", unique_ticker)
             for indicator in tech_indicator_list:
